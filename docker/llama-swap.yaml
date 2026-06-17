@@ -1,0 +1,57 @@
+# llama-swap — multi-model OpenAI-compatible proxy for the agent core.
+# Loads the model named in each request and unloads the previous one (only one
+# ~30B model fits in 16 GB at a time). Add models by copying a block under `models:`.
+#
+# Clients hit ONE endpoint and pick the model via the OpenAI `model` field:
+#   curl .../v1/chat/completions -d '{"model":"glm-4.7-flash", ...}'
+# List available models: GET /v1/models
+
+healthCheckTimeout: 300        # seconds to wait for a model to load before erroring
+logLevel: info
+startPort: 9000                # internal ports auto-assigned to spawned llama-server instances
+
+# Auth: clients send this as a Bearer token. llama-swap validates it and STRIPS the
+# header before forwarding upstream. Injected from $LLM_API_KEY by entrypoint.sh.
+apiKeys:
+  - "${LLM_API_KEY}"
+
+# Shared llama-server invocation. ${PORT} is filled in by llama-swap per model.
+macros:
+  llama-server: >-
+    /opt/llama/bin/llama-server
+    --host 0.0.0.0 --port ${PORT}
+    -fa on --jinja --no-webui --metrics
+
+models:
+  "glm-4.7-flash":
+    name: "GLM-4.7-Flash (30B-A3B MoE)"
+    cmd: |
+      ${llama-server}
+      -m /models/GLM-4.7-Flash-UD-Q4_K_XL.gguf
+      -ngl 99 --n-cpu-moe 20
+      -c 65536 --cache-type-k q8_0 --cache-type-v q8_0
+      -t 8 --parallel 1 -b 2048 -ub 2048 --cache-reuse 256
+      --temp 0.7 --top-p 1.0 --min-p 0.01 --repeat-penalty 1.0
+    ttl: 1800       # keep model warm for 30 min idle (fast responses); then unload to free VRAM
+
+  "qwen3.6-35b-a3b":
+    name: "Qwen3.6-35B-A3B (MoE, reasoning)"
+    cmd: |
+      ${llama-server}
+      -m /models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+      -ngl 99 --n-cpu-moe 22
+      -c 65536 --cache-type-k q8_0 --cache-type-v q8_0
+      -t 8 --parallel 1 -b 2048 -ub 2048 --cache-reuse 256
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.0 --repeat-penalty 1.0
+    ttl: 1800       # measured (UD-Q4_K_XL, 64k ctx): --n-cpu-moe 22 → ~13.2 GB / ~76 tok/s. ~0.5 GB/layer, so it OOMs faster than GLM (don't go below ~20).
+    # Qwen thinking-mode sampling (temp .6 / top-p .95 / top-k 20) per Qwen; heavy reasoner — budget max_tokens (it spends 100s of tokens thinking before the answer).
+
+  # --- template: copy, drop a GGUF in ./models, adjust flags & --n-cpu-moe ---
+  # "qwen3-coder":
+  #   name: "Qwen3 Coder"
+  #   cmd: |
+  #     ${llama-server}
+  #     -m /models/Qwen3-Coder-Whatever.gguf
+  #     -ngl 99 --n-cpu-moe 18 -c 32768
+  #     --cache-type-k q8_0 --cache-type-v q8_0 -t 8 --parallel 2
+  #   ttl: 300

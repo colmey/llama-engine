@@ -1,0 +1,10 @@
+# Secrets — NEVER commit the API key
+.api-key
+.env
+
+# Local artifacts
+models/
+llama.cpp/
+__pycache__/
+*.pyc
+*.log

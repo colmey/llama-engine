@@ -1,0 +1,10 @@
+# Keep the build context tiny — the Dockerfile clones llama.cpp itself and models
+# are mounted at runtime, so none of this should be sent to the daemon.
+models/
+llama.cpp/
+.git/
+.env
+.api-key
+*.log
+__pycache__/
+*.pyc
