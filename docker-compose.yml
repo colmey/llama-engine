@@ -23,12 +23,29 @@ services:
     volumes:
       - ${MODELS_DIR:-./models}:/models:ro   # GGUF dir; override per-box via MODELS_DIR in .env (this box: /mnt/Data/models)
       - ./docker/llama-swap.yaml:/config/llama-swap.yaml:ro
-    gpus: all                     # requires NVIDIA Container Toolkit
-    # Older Compose without `gpus:` — use this instead:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+      - ./scripts/vram-guard.sh:/usr/local/bin/vram-guard.sh:ro   # VRAM-pressure auto-evict sidecar
+    # Start the VRAM guard in the background, then hand off to the real entrypoint (which
+    # injects the API key and execs llama-swap). The guard unloads the model when free VRAM
+    # drops, so gaming/media can reclaim the GPU — see scripts/vram-guard.sh. Bind-mounted +
+    # overridden here so it works without rebuilding; fold into docker/entrypoint.sh on a rebuild.
+    entrypoint: ["/bin/sh", "-c", "sh /usr/local/bin/vram-guard.sh & exec /usr/local/bin/entrypoint.sh"]
+    environment:
+      VRAM_GUARD_FLOOR_MB: "700"   # evict the model below this much free VRAM (MiB). More cushion:
+                                   # raise --n-cpu-moe in llama-swap.yaml. Disable: VRAM_GUARD_DISABLE=1
+    # GPU via CDI (Container Device Interface) — NOT `gpus: all` / the legacy
+    # `driver: nvidia` hook. The legacy path injects the GPU device-cgroup rules
+    # out-of-band, so a `systemctl daemon-reload` (the daily apt-daily timer fires
+    # one) makes systemd re-apply its DeviceAllow list and strip the container's GPU
+    # access. The container keeps running but loses the GPU, and the next llama-swap
+    # model reload silently falls back to CPU/RAM. CDI registers the GPUs as
+    # first-class OCI devices that systemd is aware of, so they survive a reload.
+    # Requires a persisted CDI spec (regenerate after each NVIDIA driver upgrade):
+    #   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: cdi
+              device_ids:
+                - nvidia.com/gpu=all
+              capabilities: [gpu]   # required by the compose schema even for CDI

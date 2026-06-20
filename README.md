@@ -36,7 +36,14 @@ curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-contai
   | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
 sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
-docker run --rm --gpus all nvidia/cuda:13.0.1-runtime-ubuntu24.04 nvidia-smi   # verify
+
+# This stack requests the GPU via CDI (Container Device Interface), which survives a
+# `systemctl daemon-reload`. The legacy `gpus: all` hook does NOT — a daily apt timer's
+# reload silently strips the container's GPU access, dropping inference to CPU. Generate
+# the CDI spec (re-run after each NVIDIA driver upgrade):
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+
+docker run --rm --gpus all nvidia/cuda:13.0.1-runtime-ubuntu24.04 nvidia-smi   # verify driver+toolkit
 ```
 
 **Deploy:**
@@ -141,6 +148,24 @@ config is mounted — **no rebuild**); the model relaunches with the new flags o
 | `--cache-reuse 256` | Reuses a cached prompt prefix (e.g. the system prompt) across requests → much faster time-to-first-token. |
 | `-c` | Context length. Bigger ⇒ more KV-cache VRAM, so raise `--n-cpu-moe` (or quantize KV with `--cache-type-k/v q8_0`) to fit. |
 
+## Sharing the GPU with a desktop
+
+On a workstation where the GPU also drives your desktop, a model tuned to nearly fill VRAM will
+OOM when a game or other GPU-heavy app needs the card. Two safety nets ship with the stack:
+
+- **Auto-evict sidecar** ([scripts/vram-guard.sh](scripts/vram-guard.sh)) — runs inside the
+  container (started by the compose entrypoint), polls free VRAM every 2 s, and unloads the
+  resident model the moment free VRAM drops below `VRAM_GUARD_FLOOR_MB` (default 700 MiB). The GPU
+  frees automatically; the next request cold-reloads the model (~3 s). It only arms after seeing a
+  model loaded with healthy headroom, so it never false-evicts at rest. Tune `VRAM_GUARD_FLOOR_MB` /
+  `VRAM_GUARD_INTERVAL` in [docker-compose.yml](docker-compose.yml), or set `VRAM_GUARD_DISABLE=1`.
+- **Manual unload** ([scripts/llm-unload.sh](scripts/llm-unload.sh)) — frees the GPU now via
+  `GET /unload`. Doubles as a launcher wrapper that frees VRAM the instant a game starts, e.g. as a
+  Steam launch option: `/abs/path/scripts/llm-unload.sh %command%`.
+
+This matters most for models tuned to fill VRAM (e.g. `gpt-oss-20b` at `--n-cpu-moe 4` leaves only
+~1.4 GB free). For a bigger permanent cushion instead, raise `--n-cpu-moe` in the model's config.
+
 ## Security
 
 - **LAN-accessible** — published as `0.0.0.0:${LLM_HOST_PORT:-8081}` by default; any device
@@ -163,5 +188,7 @@ config is mounted — **no rebuild**); the model relaunches with the new flags o
 | `.env` / `.env.example` | API key for Compose (`.env` is git-ignored). |
 | `.api-key` | The secret itself (git-ignored). |
 | `scripts/chat.py` | Dependency-free streaming chat client / smoke test. |
+| `scripts/llm-unload.sh` | Free GPU VRAM now (`GET /unload`); |
+| `scripts/vram-guard.sh` | Sidecar that auto-evicts the model under VRAM pressure. |
 | `models/` | Your GGUF files (git-ignored data). |
 | `CLAUDE.md` | Hardware/build notes for this box. |

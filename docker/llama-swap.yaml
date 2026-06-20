@@ -46,6 +46,31 @@ models:
     ttl: 1800       # measured (UD-Q4_K_XL, 64k ctx): --n-cpu-moe 22 → ~13.2 GB / ~76 tok/s. ~0.5 GB/layer, so it OOMs faster than GLM (don't go below ~20).
     # Qwen thinking-mode sampling (temp .6 / top-p .95 / top-k 20) per Qwen; heavy reasoner — budget max_tokens (it spends 100s of tokens thinking before the answer).
 
+  "gpt-oss-20b":
+    name: "gpt-oss-20B (MXFP4 MoE, agentic/reasoning)"
+    cmd: |
+      ${llama-server}
+      -m /models/gpt-oss-20b-mxfp4.gguf
+      -ngl 99 --n-cpu-moe 4
+      -c 131072 --cache-type-k q8_0 --cache-type-v q8_0
+      -t 8 --parallel 1 -b 2048 -ub 2048 --cache-reuse 256
+      --temp 1.0 --top-p 1.0
+    ttl: 1800
+    # Native MXFP4 (~12 GB weights) — sm_120 accelerates MXFP4. Default --n-cpu-moe 4, NOT 0:
+    # MEASURED (mxfp4, 128K ctx, q8_0 KV): --n-cpu-moe 4 → ~12.1 GB / ~120 tok/s, loads with ~1.4 GB
+    #   free alongside the desktop. --n-cpu-moe 0 → 14.5 GB / ~222 tok/s is faster but wants the WHOLE
+    #   card and OOMs at graph_reserve on this box (cosmic-comp + firefox hold ~2.5 GB; -ngl 99 forbids
+    #   llama.cpp's auto-fit, so it aborts instead of offloading). Use 0 only on a freed/headless GPU.
+    # GAMING/MEDIA: this runs "tight". Free its VRAM on demand with  scripts/llm-unload.sh
+    #   (GET localhost:8081/unload) — the next request cold-reloads the model in ~3s.
+    # CONTEXT: 131072 (128K) is the model's native max. KV is cheap — half the layers use a 128-tok
+    #   sliding window (llama.cpp SWA), so the full 128K @ q8_0 KV costs only ~1.7 GB.
+    # TUNING: raise --n-cpu-moe further (~0.45 GB/layer freed) for more desktop headroom (8 → ~10.9 GB,
+    #   ~3 GB free) at some tok/s cost; or f16 KV (~3.3 GB) for max-fidelity long context.
+    # Sampling temp 1.0 / top-p 1.0 per OpenAI. Reasoning effort defaults to medium; for deeper
+    #   agentic loops add: --chat-template-kwargs '{"reasoning_effort":"high"}' (costs latency/tokens).
+    # Harmony format is applied via --jinja (embedded template) — clients hit it like any OpenAI model.
+
   # --- template: copy, drop a GGUF in ./models, adjust flags & --n-cpu-moe ---
   # "qwen3-coder":
   #   name: "Qwen3 Coder"
