@@ -1,4 +1,7 @@
 # Secrets — NEVER commit the API key
+
+# llama-swap config (per-install overrides)
+docker/llama-swap.yaml
 .api-key
 .env
 

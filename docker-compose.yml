@@ -30,7 +30,7 @@ services:
     # overridden here so it works without rebuilding; fold into docker/entrypoint.sh on a rebuild.
     entrypoint: ["/bin/sh", "-c", "sh /usr/local/bin/vram-guard.sh & exec /usr/local/bin/entrypoint.sh"]
     environment:
-      VRAM_GUARD_FLOOR_MB: "700"   # evict the model below this much free VRAM (MiB). More cushion:
+      VRAM_GUARD_FLOOR_MB: "400"   # evict the model below this much free VRAM (MiB). More cushion:
                                    # raise --n-cpu-moe in llama-swap.yaml. Disable: VRAM_GUARD_DISABLE=1
     # GPU via CDI (Container Device Interface) — NOT `gpus: all` / the legacy
     # `driver: nvidia` hook. The legacy path injects the GPU device-cgroup rules
