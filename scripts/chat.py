@@ -8,12 +8,12 @@ Usage:
     python scripts/chat.py                      # interactive REPL
     python scripts/chat.py --prompt "hello"     # one-shot (good for smoke tests)
     echo "hello" | python scripts/chat.py       # one-shot from stdin
-    python scripts/chat.py --model glm-4.7-flash --show-reasoning
+    python scripts/chat.py --model example-model --show-reasoning
 
 Connection (defaults work with this repo):
     --base-url  http://127.0.0.1:8081/v1   (or $LLM_BASE_URL)
     --key       from $LLM_API_KEY, else ./.api-key
-    --model     glm-4.7-flash              (or $LLM_MODEL_ID)
+    --model     example-model              (or $LLM_MODEL_ID)
 
 REPL commands:  /reset  /system <text>  /model <name>  /models  /help  /quit
 """
@@ -120,13 +120,13 @@ def stream_reply(base_url, key, model, messages, show_reasoning):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Streaming chat client for the local GLM endpoint.")
+    ap = argparse.ArgumentParser(description="Streaming chat client for the local inference endpoint.")
     ap.add_argument("--base-url", default=os.environ.get("LLM_BASE_URL", "http://127.0.0.1:8081/v1"))
-    ap.add_argument("--model", default=os.environ.get("LLM_MODEL_ID", "glm-4.7-flash"))
+    ap.add_argument("--model", default=os.environ.get("LLM_MODEL_ID", "example-model"))
     ap.add_argument("--key", default=None)
     ap.add_argument("--system", default=None, help="System prompt.")
     ap.add_argument("--prompt", default=None, help="One-shot prompt, then exit.")
-    ap.add_argument("--show-reasoning", action="store_true", help="Stream GLM's reasoning too.")
+    ap.add_argument("--show-reasoning", action="store_true", help="Stream the model's reasoning too.")
     args = ap.parse_args()
 
     key = resolve_key(args.key)

@@ -5,8 +5,8 @@ A small, self-hosted **OpenAI-compatible** inference endpoint for local LLMs, bu
 One stable URL serves many models; clients pick the model by name and llama-swap loads it
 on demand (and unloads it when idle). Intended as a backend for agents and tools.
 
-Ships configured for **GLM-4.7-Flash** (30B-A3B MoE) on a 16 GB GPU as the worked example,
-but adding any GGUF is a few lines of config.
+Ships with a single placeholder model block; point it at any GGUF you download and
+add more models in a few lines of config.
 
 ```
 client ──HTTP / OpenAI API──► ${LLM_HOST_PORT:-8081}  (0.0.0.0 = LAN-accessible)
@@ -53,14 +53,21 @@ docker run --rm --gpus all nvidia/cuda:13.0.1-runtime-ubuntu24.04 nvidia-smi   #
 openssl rand -hex 32 > .api-key && chmod 600 .api-key
 echo "LLM_API_KEY=$(cat .api-key)" > .env
 
-# 2. a model GGUF into ./models  (example: GLM-4.7-Flash)
+# 2. pick a model — edit these two lines, then paste the rest as-is
+MODEL_REPO="<org>/<model>-GGUF"   # any GGUF repo on huggingface.co
+MODEL_GLOB="*Q4_K*"               # which quant to pull (a ~30B MoE at Q4 fits ~16 GB)
 pip install -U "huggingface_hub[cli]"
-hf download unsloth/GLM-4.7-Flash-GGUF --include "*UD-Q4_K_XL*" --local-dir models
+hf download "$MODEL_REPO" --include "$MODEL_GLOB" --local-dir models
 
-# 3. build the image (compiles llama.cpp for your GPU — ~10–20 min first time, then cached) and start
+# 3. create your config and point it at the file you just downloaded (no manual edit)
+cp docker/llama-swap.yaml.example docker/llama-swap.yaml
+GGUF=$(basename "$(ls models/*.gguf | head -1)")
+sed -i "s#-m /models/example-model.gguf#-m /models/$GGUF#" docker/llama-swap.yaml
+
+# 4. build the image (compiles llama.cpp for your GPU — ~10–20 min first time, then cached) and start
 docker compose up -d --build
 
-# 4. confirm it's up
+# 5. confirm it's up
 curl -s -H "Authorization: Bearer $(cat .api-key)" http://127.0.0.1:8081/v1/models
 ```
 
@@ -82,7 +89,7 @@ The `model` field selects which GGUF llama-swap loads; `GET /v1/models` lists wh
 KEY=$(cat .api-key)
 curl -s http://127.0.0.1:8081/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"model":"glm-4.7-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":512}'
+  -d '{"model":"example-model","messages":[{"role":"user","content":"hi"}],"max_tokens":512}'
 ```
 
 **Bundled client** ([scripts/chat.py](scripts/chat.py)) — stdlib only, no `pip`. Streams
@@ -100,7 +107,7 @@ from openai import OpenAI
 client = OpenAI(base_url="http://127.0.0.1:8081/v1", api_key=open(".api-key").read().strip())
 
 resp = client.chat.completions.create(
-    model="glm-4.7-flash",                       # name selects/swaps the model
+    model="example-model",                       # name selects/swaps the model
     messages=[{"role": "user", "content": "What's the weather in Denver? Use the tool."}],
     tools=[{"type": "function", "function": {
         "name": "get_weather", "description": "Current weather for a city.",
@@ -112,7 +119,7 @@ msg = resp.choices[0].message
 print(msg.tool_calls or msg.content)
 ```
 
-> GLM-4.7-Flash reasons before answering: the chain-of-thought arrives in `reasoning_content`
+> If the model reasons before answering, the chain-of-thought arrives in `reasoning_content`
 > and the answer in `content`. Budget `max_tokens ≥ 512` or you may get only reasoning back.
 
 ## How API keying works
@@ -143,7 +150,7 @@ config is mounted — **no rebuild**); the model relaunches with the new flags o
 
 | Lever | What it does |
 |---|---|
-| `--n-cpu-moe N` | Main VRAM ↔ speed knob: keeps the top N layers' experts on CPU. **Lower N = more on GPU = faster**, until you OOM. Measured (GLM UD-Q4_K_XL, 32k ctx): N=22 → ~12.6 GB / ~72 tok/s; N=20 → ~13 GB / ~76 tok/s. |
+| `--n-cpu-moe N` | Main VRAM ↔ speed knob (MoE models): keeps the top N layers' experts on CPU. **Lower N = more on GPU = faster**, until you OOM. Example (a ~30B MoE at Q4, 32k ctx): N=22 → ~12.6 GB / ~72 tok/s; N=20 → ~13 GB / ~76 tok/s. |
 | `ttl` | Idle seconds before the model unloads and frees VRAM. `0` = stay resident; `1800` = warm for 30 min then release. |
 | `--cache-reuse 256` | Reuses a cached prompt prefix (e.g. the system prompt) across requests → much faster time-to-first-token. |
 | `-c` | Context length. Bigger ⇒ more KV-cache VRAM, so raise `--n-cpu-moe` (or quantize KV with `--cache-type-k/v q8_0`) to fit. |
@@ -155,7 +162,8 @@ OOM when a game or other GPU-heavy app needs the card. Two safety nets ship with
 
 - **Auto-evict sidecar** ([scripts/vram-guard.sh](scripts/vram-guard.sh)) — runs inside the
   container (started by the compose entrypoint), polls free VRAM every 2 s, and unloads the
-  resident model the moment free VRAM drops below `VRAM_GUARD_FLOOR_MB` (default 700 MiB). The GPU
+  resident model the moment free VRAM drops below `VRAM_GUARD_FLOOR_MB` (400 MiB as shipped in
+  [docker-compose.yml](docker-compose.yml); the script's own default is 700). The GPU
   frees automatically; the next request cold-reloads the model (~3 s). It only arms after seeing a
   model loaded with healthy headroom, so it never false-evicts at rest. Tune `VRAM_GUARD_FLOOR_MB` /
   `VRAM_GUARD_INTERVAL` in [docker-compose.yml](docker-compose.yml), or set `VRAM_GUARD_DISABLE=1`.
@@ -163,15 +171,15 @@ OOM when a game or other GPU-heavy app needs the card. Two safety nets ship with
   `GET /unload`. Doubles as a launcher wrapper that frees VRAM the instant a game starts, e.g. as a
   Steam launch option: `/abs/path/scripts/llm-unload.sh %command%`.
 
-This matters most for models tuned to fill VRAM (e.g. `gpt-oss-20b` at `--n-cpu-moe 4` leaves only
-~1.4 GB free). For a bigger permanent cushion instead, raise `--n-cpu-moe` in the model's config.
+This matters most for a model tuned to fill VRAM (a low `--n-cpu-moe` can leave only ~1–2 GB free).
+For a bigger permanent cushion instead, raise `--n-cpu-moe` in the model's config.
 
 ## Security
 
 - **LAN-accessible** — published as `0.0.0.0:${LLM_HOST_PORT:-8081}` by default; any device
   on the network can reach it. Bind to `127.0.0.1` only by setting `LLM_HOST_PORT` in `.env`
   and adjusting the port mapping in [docker-compose.yml](docker-compose.yml) to
-  `"127.0.0.1:${LLM_HOST_PORT:-8081}:${LLM_CONTAINER_PORT:-8080}"`.
+  `"127.0.0.1:${LLM_HOST_PORT:-8081}:8080"`.
 - **API key required** — even locally, so other users/processes can't use your GPU.
 - **Models read-only** — mounted `:ro`; the container can't modify your GGUFs.
 - **Secrets git-ignored** — `.api-key`, `.env`, and `models/` never leave the box.
@@ -181,14 +189,13 @@ This matters most for models tuned to fill VRAM (e.g. `gpt-oss-20b` at `--n-cpu-
 
 | Path | What it is |
 |---|---|
-| `docker-compose.yml` | What you run — GPU, the `127.0.0.1:8081` bind, mounts, `.env`. |
+| `docker-compose.yml` | What you run — GPU, the `0.0.0.0:8081` (LAN) bind, mounts, `.env`. |
 | `docker/Dockerfile` | Builds llama.cpp (CUDA) + bundles llama-swap. |
 | `docker/entrypoint.sh` | Injects the API key into the config at startup. |
-| `docker/llama-swap.yaml` | **Your config** — which models exist and their tuned flags. |
+| `docker/llama-swap.yaml.example` | Config template — copy to `docker/llama-swap.yaml` (git-ignored) to set which models exist and their tuned flags. |
 | `.env` / `.env.example` | API key for Compose (`.env` is git-ignored). |
 | `.api-key` | The secret itself (git-ignored). |
 | `scripts/chat.py` | Dependency-free streaming chat client / smoke test. |
 | `scripts/llm-unload.sh` | Free GPU VRAM now (`GET /unload`); |
 | `scripts/vram-guard.sh` | Sidecar that auto-evicts the model under VRAM pressure. |
 | `models/` | Your GGUF files (git-ignored data). |
-| `CLAUDE.md` | Hardware/build notes for this box. |

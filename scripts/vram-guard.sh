@@ -2,7 +2,7 @@
 # Sidecar guard: auto-evict the resident llama-swap model when the GPU runs low on
 # free VRAM, so gaming / other GPU work can reclaim the card without OOMing.
 #
-# gpt-oss-20b runs "tight" on this 16 GB card (~12.3 GB, ~1.4 GB free at rest). When
+# A model tuned to nearly fill VRAM runs "tight" (little free at rest). When
 # something external (a game, heavy media) pushes free VRAM below FLOOR, this GETs
 # /unload to free ~12 GB; the next chat request cold-reloads the model (~3s), so an
 # eviction is cheap. It only fires once it has seen a model "ready" WITH healthy

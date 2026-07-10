@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Unload whatever model llama-swap currently has resident, freeing its VRAM now.
 #
-# Why: gpt-oss-20b runs "tight" on this box (~12 GB, only ~1.4 GB free alongside the
+# Why: a model tuned to nearly fill VRAM runs "tight" (little free alongside the
 # desktop), so it must yield the GPU on demand for gaming / GPU-heavy media. The next
 # chat request cold-reloads the model automatically (~3s), so this is cheap to use.
 # Safe to run when nothing is loaded (llama-swap just returns 200).

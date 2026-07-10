@@ -21,7 +21,7 @@ services:
     ports:
       - "0.0.0.0:${LLM_HOST_PORT:-8081}:8080"   # LAN-accessible: all devices on the network can reach it
     volumes:
-      - ${MODELS_DIR:-./models}:/models:ro   # GGUF dir; override per-box via MODELS_DIR in .env (this box: /mnt/Data/models)
+      - ${MODELS_DIR:-./models}:/models:ro   # GGUF dir; override via MODELS_DIR in .env (e.g. point at a larger disk)
       - ./docker/llama-swap.yaml:/config/llama-swap.yaml:ro
       - ./scripts/vram-guard.sh:/usr/local/bin/vram-guard.sh:ro   # VRAM-pressure auto-evict sidecar
     # Start the VRAM guard in the background, then hand off to the real entrypoint (which
