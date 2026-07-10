@@ -101,6 +101,19 @@ python3 scripts/chat.py --show-reasoning   # also stream the model's chain-of-th
 ```
 It reads the key from `.api-key` and defaults to `http://127.0.0.1:8081/v1`.
 
+**Model benchmark** ([scripts/benchmark.py](scripts/benchmark.py)) — benchmarks every model
+reported by llama-swap sequentially, including one unloaded (cold) request and three warm
+requests by default:
+```bash
+python3 scripts/benchmark.py
+python3 scripts/benchmark.py --model qwen3.5-9b --runs 5
+python3 scripts/benchmark.py --max-tokens 256 --json benchmark-results.json
+```
+The table reports cold and warm time-to-first-token (TTFT), total latency, and warm output
+tokens/second. Cold TTFT is client-observed, so it includes model startup, prompt processing,
+network overhead, and first-token generation. Token throughput is shown only when the server
+returns completion-token usage; JSON output includes every individual run and error.
+
 **OpenAI SDK** (incl. tool calling, for agents):
 ```python
 from openai import OpenAI
@@ -196,6 +209,7 @@ For a bigger permanent cushion instead, raise `--n-cpu-moe` in the model's confi
 | `.env` / `.env.example` | API key for Compose (`.env` is git-ignored). |
 | `.api-key` | The secret itself (git-ignored). |
 | `scripts/chat.py` | Dependency-free streaming chat client / smoke test. |
+| `scripts/benchmark.py` | Dependency-free cold-load and generation-speed benchmark. |
 | `scripts/llm-unload.sh` | Free GPU VRAM now (`GET /unload`); |
 | `scripts/vram-guard.sh` | Sidecar that auto-evicts the model under VRAM pressure. |
 | `models/` | Your GGUF files (git-ignored data). |
